@@ -193,19 +193,21 @@ if __name__ == '__main__':
                 string = words[2].decode('hex')
                 
                 if blocknumber == 0:
-                    print "Segment", blockstring, lock[blocknumber], "Manufacturer Info:\t", string[:string.index('\xff')], " Written:", written[blocknumber]
+                    pass
                 if blocknumber == 1:
-                    print "Segment", blockstring, lock[blocknumber], "Test Machine Info:\t", string[:string.index('\xff')], " Written:", written[blocknumber]
+                    print "Segment", blockstring, lock[blocknumber], "Manufacturer Info:\t", string[:string.index('\xff')], " Written:", written[blocknumber]
                 if blocknumber == 2:
-                    print "Segment", blockstring, lock[blocknumber], "Manufacturing Info:\t", string[:string.index('\xff')], " Written:", written[blocknumber]
+                    print "Segment", blockstring, lock[blocknumber], "Test Machine Info:\t", string[:string.index('\xff')], " Written:", written[blocknumber]
                 if blocknumber == 3:
-                    print "Segment", blockstring, lock[blocknumber], "Date of Testing:\t", string[:string.index('\xff')], " Written:", written[blocknumber]
+                    print "Segment", blockstring, lock[blocknumber], "Manufacturing Info:\t", string[:string.index('\xff')], " Written:", written[blocknumber]
                 if blocknumber == 4:
-                    print "Segment", blockstring, lock[blocknumber], "Time of Testing:\t", string[:string.index('\xff')], " Written:", written[blocknumber]
+                    print "Segment", blockstring, lock[blocknumber], "Date of Testing:\t", string[:string.index('\xff')], " Written:", written[blocknumber]
                 if blocknumber == 5:
+                    print "Segment", blockstring, lock[blocknumber], "Time of Testing:\t", string[:string.index('\xff')], " Written:", written[blocknumber]
+                if blocknumber == 6:
                     accel_data0 = struct.unpack('6f', bytearray.fromhex(words[2][:48]))
                     print "Segment", blockstring, lock[blocknumber], "Accel :\t", accel_data0, " Written:", written[blocknumber]
-                if blocknumber == 6:
+                if blocknumber == 7:
                     accel_data2 = struct.unpack('6f', bytearray.fromhex(words[2][:48]))
                     print "Segment", blockstring, lock[blocknumber], "Accel :\t", accel_data2, " Written:", written[blocknumber]
                     read_success = True
