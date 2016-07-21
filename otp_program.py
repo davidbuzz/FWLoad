@@ -1,6 +1,25 @@
-
+#!/usr/bin/python
 '''
 Write Information to OTP area
+
+NOTES etc: 
+
+Reference for how this code works:  
+https://github.com/3drobotics/PX4Firmware-solo/blob/master/src/systemcmds/otp/README.txt
+and code here: 
+https://github.com/3drobotics/PX4Firmware-solo/blob/master/src/systemcmds/otp/otp.c
+which relies on:
+https://github.com/3drobotics/PX4Firmware-solo/blob/master/src/modules/systemlib/otp.c 
+
+We also have a "mock" version of the 'otp' command that runs under linux and just reads/writes to a cople of .bin files but is otherwise stntactically compatible with the nsh one:  ( it's for testing etc ) 
+ see mock/otp command 
+
+See also: http://stackoverflow.com/questions/34831131/pyserial-does-not-play-well-with-virtual-port 
+ 
+I'm pretty sure solo/pixhawk MUST be already booted prior to running this, or the kernel messages might mess with it.... and it appears it probably has to be a "fresh" boot too or nsh might run out of ram...? 
+ 
+On Solo, you are best-off being connected to serial 5 on the accessory bay of sol ( rx/tx on pins 9 and 15 ) ..
+ 
 '''
 import sys
 import argparse
@@ -91,28 +110,34 @@ if __name__ == '__main__':
     port = args.port
     print("Trying %s" % port)
 
+    conn = None
     # attach to the port
     try:
             if "linux" in _platform:
                     # Linux, don't open Mac OS and Win ports
                     if not "COM" in port and not "tty.usb" in port:
-                            conn = serial.Serial(port, args.baud, timeout=5)
+                            conn = serial.Serial(port, args.baud, timeout=5,rtscts=True,dsrdtr=True)
             elif "darwin" in _platform:
                     # OS X, don't open Windows and Linux ports
                     if not "COM" in port and not "ACM" in port:
-                            conn = serial.Serial(port, args.baud, timeout=5)
+                            conn = serial.Serial(port, args.baud, timeout=5,rtscts=True,dsrdtr=True)
             elif "win" in _platform:
                     # Windows, don't open POSIX ports
                     if not "/" in port:
                             conn = serial.Serial(port, args.baud, timeout=5)
-    except Exception:
+    except Exception as e:
         # open failed, rate-limit our attempts
-        print "Port Not Found!"
-        sys.exit()
+        print "Port Not Found!"+str(e)
+        #print repr(conn)
+        #sys.exit()
+    # Inappropriate ioctl for device    
+        
     retry = 0
     read_success = False
-    lock = []
-    written = []
+    lock = ['','','','','','','','','','','','','','','','']    # fixed size 16, must be initialised. 
+    written = ['','','','','','','','','','','','','','','','']
+    starttime = int(time.time())  # now in unix seconds. 
+    
     while retry < 3:
         time.sleep(1)
         conn.close()
@@ -121,108 +146,84 @@ if __name__ == '__main__':
         #Display Information
         conn.write("otp show\r\n".encode())
 
-        count = 0
+        linecount = 0
+        # break out on success
         if read_success == True:
             break
+            
+        # breakout on global 30 second timeout ( that's 10 secs per re-try ) 
+        now = int(time.time()) # now in unix seconds. 
+        if now > starttime + 30:
+                break
+                
         print "Data in OTP segments:"
         last_time = time.time()
         while True:
             this_time = time.time()
-            if (this_time - last_time) > 5:
+            if (this_time - last_time) > 5:  # max 5 seconds to handle reading the results of this one command.
                 retry = retry + 1
                 break;
-            line  = conn.readline()
-            if count == 2:
-                info = line.split()
-                if info[1] == 'U':
-                    lock.append("Unlocked\t")
+            # caution... readline needs a ASCII LF (10 decimal) to think its the end of the line, 
+            # ASCII CR (13 decimal ) won't do it, and could block the readline() until 
+            # the entire output is sent and a timeout occurs.?  be sure you're sending the right one.
+            line  = conn.readline()    
+            #print "handling line:"+line+"    -> at linecount:"+str(linecount)
+            
+            words = line.split()   
+            
+            # basic sanity check on words sizes and qty ...so we don't try to parse rubbish:
+            if (len(words) == 4) and (len(words[0]) <= 3 )  and (len(words[1]) == 1) and (len(words[2]) == 64) and (len(words[3]) == 8) :   
+            # example line: ' 0: U ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff e666fea6'
+            # example line: '11: U ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff e666fea6'
+            
+                blockstring = words[0]   # that's the first wordin the line  ( ie '0:' or '12:' etc )
+                blockstring = blockstring[0:-1] # drop the colon on the end
+                blocknumber = int(blockstring)
+                
+                if words[1] == 'U':
+                    lock[blocknumber] = "Unlocked\t"
                 else:
-                    lock.append("Locked\t")
-                if info[2][:4] != "ffff":
-                    written.append(True)
-                else:
-                    written.append(False)
-                string = info[2].decode('hex')
-                print "Segment", info[0], lock[count - 2], "Manufacturer Info:\t", string[:string.index('\xff')], " Written:", written[count -2]
-            elif count == 3:
-                info = line.split()
-                if info[1] == 'U':
-                    lock.append("Unlocked\t")
-                else:
-                    lock.append("Locked\t")
-                if info[2][:4] != "ffff":
-                    written.append(True)
-                else:
-                    written.append(False)
-                string = info[2].decode('hex')
-                print "Segment", info[0], lock[count - 2], "Test Machine Info:\t", string[:string.index('\xff')], " Written:", written[count -2]
-            elif count == 4:
-                info = line.split()
-                if info[1] == 'U':
-                    lock.append("Unlocked\t")
-                else:
-                    lock.append("Locked\t")
-                if info[2][:4] != "ffff":
-                    written.append(True)
-                else:
-                    written.append(False)
-                string = info[2].decode('hex')
-                print "Segment", info[0], lock[count - 2], "Manufacturing Info:\t", string[:string.index('\xff')], " Written:", written[count -2]
-            elif count == 5:
-                info = line.split()
-                if info[1] == 'U':
-                    lock.append("Unlocked\t")
-                else:
-                    lock.append("Locked\t")
-                if info[2][:4] != "ffff":
-                    written.append(True)
-                else:
-                    written.append(False)
-                string = info[2].decode('hex')
-                print "Segment", info[0], lock[count - 2], "Date of Testing:\t", string[:string.index('\xff')], " Written:", written[count -2]
-            elif count == 6:
-                info = line.split()
-                if info[1] == 'U':
-                    lock.append("Unlocked\t")
-                else:
-                    lock.append("Locked\t")
-                if info[2][:4] != "ffff":
-                    written.append(True)
-                else:
-                    written.append(False)
-                string = info[2].decode('hex')
-                print "Segment", info[0], lock[count - 2], "Time of Testing:\t", string[:string.index('\xff')], " Written:", written[count -2]
-            elif count == 7:
-                info = line.split()
-                if info[1] == 'U':
-                    lock.append("Unlocked\t")
-                else:
-                    lock.append("Locked\t")
-                if info[2][:4] != "ffff":
-                    written.append(True)
-                else:
-                    written.append(False)
-                accel_data0 = struct.unpack('6f', bytearray.fromhex(info[2][:48]))
-                print "Segment", info[0], lock[count - 2], "Accel :\t", accel_data0, " Written:", written[count -2]
-            elif count == 8:
-                info = line.split()
-                if info[1] == 'U':
-                    lock.append("Unlocked\t")
-                else:
-                    lock.append("Locked\t")
-                if info[2][:4] != "ffff":
-                    written.append(True)
-                else:
-                    written.append(False)
-                accel_data2 = struct.unpack('6f', bytearray.fromhex(info[2][:48]))
-                print "Segment", info[0], lock[count - 2], "Accel :\t", accel_data2, " Written:", written[count -2]
-                read_success = True
+                    lock[blocknumber] = "Locked\t"
 
-            count = count+1
-            if count == 17:
+                if words[2][:4] != "ffff":
+                    written[blocknumber] = True
+                else:
+                    written[blocknumber] = False
+                    
+                string = words[2].decode('hex')
+                
+                if blocknumber == 0:
+                    print "Segment", blockstring, lock[blocknumber], "Manufacturer Info:\t", string[:string.index('\xff')], " Written:", written[blocknumber]
+                if blocknumber == 1:
+                    print "Segment", blockstring, lock[blocknumber], "Test Machine Info:\t", string[:string.index('\xff')], " Written:", written[blocknumber]
+                if blocknumber == 2:
+                    print "Segment", blockstring, lock[blocknumber], "Manufacturing Info:\t", string[:string.index('\xff')], " Written:", written[blocknumber]
+                if blocknumber == 3:
+                    print "Segment", blockstring, lock[blocknumber], "Date of Testing:\t", string[:string.index('\xff')], " Written:", written[blocknumber]
+                if blocknumber == 4:
+                    print "Segment", blockstring, lock[blocknumber], "Time of Testing:\t", string[:string.index('\xff')], " Written:", written[blocknumber]
+                if blocknumber == 5:
+                    accel_data0 = struct.unpack('6f', bytearray.fromhex(words[2][:48]))
+                    print "Segment", blockstring, lock[blocknumber], "Accel :\t", accel_data0, " Written:", written[blocknumber]
+                if blocknumber == 6:
+                    accel_data2 = struct.unpack('6f', bytearray.fromhex(words[2][:48]))
+                    print "Segment", blockstring, lock[blocknumber], "Accel :\t", accel_data2, " Written:", written[blocknumber]
+                    read_success = True
+
+            else:
+                print "unknown line, ignoring:"+line
+
+            linecount = linecount+1
+            if linecount >= 17:
                 break;
 
     if args.only_display or read_success == False:
+        conn.close()
+        sys.exit(1)
+            
+            
+    if not 'data' in args:
+        print "no data given, aborting."
         conn.close()
         sys.exit(1)
 

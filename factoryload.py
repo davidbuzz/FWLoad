@@ -155,8 +155,17 @@ def factory_install(device_barcode):
     #Add OTP HERE
     script_dir = os.path.dirname(os.path.abspath(__file__))
     if args.otp_show:
-        p1 = Popen(['python', script_dir + '/otp_program.py', '--port', FMU_DEBUG,'--only-display',"abc"], stdin=PIPE, stdout=PIPE, stderr=PIPE)
-        output, err = p1.communicate()
+        # -u means unbuffered in the child , 'timeout=10' gives up on child process if not completed in 10 seconds ( raises a  TimeoutExpired exception ) 
+        app1 = ['python','-u', script_dir + '/otp_program.py', '--port', FMU_DEBUG,'--only-display',"abc"]
+        p1 = Popen(app1, stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        try:
+            output, err = p1.communicate(input=None,timeout=10)
+        except TimeoutExpired as e:
+            print "TIMED-OUT! unable to run:"+str(app)
+            p1.kill()
+            output, err = p1.communicate(timeout=10) # cleanup comms after kill
+        
+        # if the process never finishes, communicate() can hang...as it reads all output, and waits for the subprocess to exit.
         logger.info(output)
     time.sleep(1)
     #conn = connection.Connection(ref_only=False)
@@ -189,16 +198,32 @@ def factory_install(device_barcode):
     print "Accel :", accel_data0
     print "Accel :", accel_data2
     if True:#args.otp_write:
-	#Manufacturing Info
-        p2 = Popen(['python', script_dir + '/otp_program.py', '--port', FMU_DEBUG,'Hex Technology, \xA9 ProfiCNC 2016',getMacAddress(),device_barcode,time.strftime("%x"),time.strftime("%X"),'--',str(accel_data0),str(accel_data2)], stdin=PIPE, stdout=PIPE, stderr=PIPE)
-        output, err = p2.communicate()
+	    #Manufacturing Info
+        app2 = ['python','-u', script_dir + '/otp_program.py', '--port', FMU_DEBUG,'Hex Technology, \xA9 ProfiCNC 2016',getMacAddress(),device_barcode,time.strftime("%x"),time.strftime("%X"),'--',str(accel_data0),str(accel_data2)]
+        p2 = Popen(app2, stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        try:
+            output, err = p2.communicate(input=None,timeout=10)
+        except TimeoutExpired as e:
+            print "TIMED-OUT! unable to run:"+str(app)
+            p2.kill()
+            output, err = p2.communicate(timeout=10) # cleanup comms after kill
+            
+            
         logger.info(output)
 	logger.info(err)
 	time.sleep(1)
         #Display
-        #p3 = Popen(['python', script_dir + '/otp_program.py', '--port', FMU_DEBUG,'--only-display',"abc"], stdin=PIPE, stdout=PIPE, stderr=PIPE)
-        #output, err = p3.communicate()
+        #app3 = ['python','-u', script_dir + '/otp_program.py', '--port', FMU_DEBUG,'--only-display',"abc"]
+        #p3 = Popen(app3, stdin=PIPE, stdout=PIPE, stderr=PIPE)
+#        try:
+#            output, err = p3.communicate(input=None,timeout=10)
+#        except TimeoutExpired as e:
+#            print "TIMED-OUT! unable to run:"+str(app)
+#            p3.kill()
+#            output, err = p3.communicate(timeout=10) # cleanup comms after kill
+            
         #logger.info(output)
+        
 
     colour_text.print_green('''
 ================================================
