@@ -41,7 +41,7 @@ import os
 import binascii
 import crcmod
 import zlib
-from pyotp import Read_OTP,Display_OTP,Write_OTP,Verify_OTP,Lock_OTP,Read_OTP_with_retries,simple_serial_connect,Lock_OTP_with_retries
+from pyotp import Read_OTP,Display_OTP,Write_OTP,Verify_OTP,Lock_OTP,Read_OTP_with_retries,simple_serial_connect,Lock_OTP_with_retries,getMacAddress
 
 
 '''
@@ -69,14 +69,56 @@ Lock:
                         python otp_program.py --port /dev/ttyxxx --info-seg INFO_SEG --lock
 '''
 
+def do_test_it(port):
+
+        device_barcode = '1234567890'  # clearly a test.
+
+        # based on real, but just for test
+        accel_data0 = "-0.06946194171905518, 0.053553998470306396, 0.3886359930038452, 1.0024930238723755, 1.0024499893188477, 0.9902349710464478"
+        accel_data2 = "0.1371384561061859, -0.07665999978780746, -0.15483899414539337, 0.9974809885025024, 0.9937639832496643, 0.9951850175857544"
+    
+        # each of the 7 blocks: ( 1-7 ) , noting that we don't populate block zero.(0)
+        
+        Manufacturer_Info='Hex Technology, \xA9 ProfiCNC 2016'
+        Machine_Information=getMacAddress()
+        Manufacturing_Info=device_barcode
+        Date_of_Testing=time.strftime("%x")
+        Time_of_Testing=time.strftime("%X")
+        Accel_Calib_data1=str(accel_data0)
+        Accel_Calib_data2=str(accel_data2)
+        
+        # we write them in this order, starting at 1, not zero
+        otp_keys =  ['Manufacturer_Info','Machine_Information','Manufacturing_Info','Date_of_Testing','Time_of_Testing','Accel_Calib_data1','Accel_Calib_data2']
+        otp_values = [Manufacturer_Info,  Machine_Information,  Manufacturing_Info,  Date_of_Testing,  Time_of_Testing,  Accel_Calib_data1,  Accel_Calib_data2]
+        
+        from pyotp import Read_OTP,Display_OTP,Write_OTP,Verify_OTP,Lock_OTP,Read_OTP_with_retries,simple_serial_connect,Lock_OTP_with_retries
+        Xconn = simple_serial_connect(port,57600)
+        verbosity = 1  # 0,1,2,3
+        otp_data = Read_OTP_with_retries(Xconn,verbosity)
+        if otp_data['read_success'] == True:
+            Display_OTP(Xconn,otp_data)
+            blocknumber = 1
+            for infostring in otp_values: 
+               Write_OTP(Xconn,blocknumber,infostring)
+               Lock_OTP_with_retries(Xconn,blocknumber)
+               Verify_OTP(Xconn,blocknumber,infostring,None,verbosity)
+               blocknumber = blocknumber + 1
+        else:
+            print "sorry, failed to read from OTP in THREE tries! "
+            
+        Xconn.close()  
+
+
 
 if __name__ == '__main__':
+
     # Parse commandline arguments
     parser = argparse.ArgumentParser(description="OTP Programmer for the PX autopilot system.", formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('--port', action="store", required=True, help="Serial port(s) to which the FMU may be attached")
     parser.add_argument('--baud', action="store", type=int, default=57600, help="Baud rate of the serial port (default is 115200), only required for true serial ports.")
     parser.add_argument('--only-display', action='store_true', default=False, help="specify if you want to only display otp space")
     parser.add_argument('--lock', action='store_true', default=False, help="specify if you want to lock the mentioned portion of otp space")
+    parser.add_argument('--test', action='store_true', default=False, help="do the built-in test, please don't use on real OTP hardware.")
 
     # add upto three -v -v -v params for increasinly harder output to comprehend.
     parser.add_argument('--verbose', '-v', action='count', default=False, help="show also the raw hex output of the 'otp show' command, or more if repeated")
@@ -92,11 +134,16 @@ if __name__ == '__main__':
     parser.add_argument('--info', action="store", default="Hex Technology, \xA9 ProfiCNC 2016", help='Information')
     args = parser.parse_args()
 
-    print repr(args)
-    
+ 
+    #    where to connect to? 
     port = args.port
     print("Trying %s" % port)
-    
+   
+    # just do the built-in test and get out.
+    if args.test:
+        do_test_it(port);
+        sys.exit()
+
     # verbosity level of 0, 1, 2 at least
     verbosity = 0
     if args.verbose:
