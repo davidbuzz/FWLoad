@@ -1,6 +1,7 @@
 import time
 import struct
 import sys
+import binascii
 
 BASICDEBUG = False
 MOREDEBUG = False
@@ -153,6 +154,10 @@ def Read_OTP(conn,DEBUG=True):
             # ASCII CR (13 decimal ) won't do it, and could block the readline() until 
             # the entire output is sent and a timeout occurs.?  be sure you're sending the right one.
             line  = conn.readline()    
+            
+            # in non-blocking mode, we get a lot of zero-length data to ignore.. ( see simple_serial_connect timeouts ) 
+            if len(line) == 0:
+                continue
             
             if MOREDEBUG:
                 print "handling line:"+line+"    -> at linecount:"+str(linecount)
@@ -352,6 +357,7 @@ def Write_OTP(conn,blocknumber,infostring,DEBUG=True):
         return str(blocknumber) + " " + str(information) + " " + str(crc) + "\r\n"
 
 
+
 # verify one block:
 def Verify_OTP(conn,blocknumber,infostring,otp_data=None,DEBUG=True):
     if BASICDEBUG:
@@ -440,14 +446,18 @@ def Lock_OTP(conn,blocknumber,DEBUG=True):
     if BASICDEBUG:
         print cmd,
     conn.write(cmd)
-    #print "Segment " + str(blocknumber) + " locked!\n"
+    print "Segment " + str(blocknumber) + " probably locked!\n"
    
 
+    # immediate validate: ? 
     # this waits for 2-ish secs for the serial device to get back to us with it's response of "LOCKED" or similar.
+    # this relies on the readline() being nonblocking as per simple_serial_connect()s timeout values
     last_time = time.time()
     while (time.time() - last_time) < 2:
         #print "thinking"
-        line = conn.readline()  # could block here, not great.
+        line = conn.readline()  # don't block here, see above.
+        if len(line) == 0:
+            continue
         if BASICDEBUG:
             print "line:"+line,
         if (line != None) and ( line != "") :
@@ -459,6 +469,7 @@ def Lock_OTP(conn,blocknumber,DEBUG=True):
     return False            
                 
 
+# this is non-blocking on both read() and write() calls due to the use of writeTimeout = 0 and timeout = 0
 def simple_serial_connect(port,baud=57600,timeout=5,rtscts=True,dsrdtr=True):
 
     from sys import platform as _platform
@@ -470,15 +481,15 @@ def simple_serial_connect(port,baud=57600,timeout=5,rtscts=True,dsrdtr=True):
             if "linux" in _platform:
                     # Linux, don't open Mac OS and Win ports
                     if not "COM" in port and not "tty.usb" in port:
-                            conn = serial.Serial(port, baud, timeout=5,rtscts=True,dsrdtr=True)
+                            conn = serial.Serial(port, baud, timeout=0,rtscts=True,dsrdtr=True,writeTimeout = 0)
             elif "darwin" in _platform:
                     # OS X, don't open Windows and Linux ports
                     if not "COM" in port and not "ACM" in port:
-                            conn = serial.Serial(port, baud, timeout=5,rtscts=True,dsrdtr=True)
+                            conn = serial.Serial(port, baud, timeout=0,rtscts=True,dsrdtr=True,writeTimeout = 0)
             elif "win" in _platform:
                     # Windows, don't open POSIX ports
                     if not "/" in port:
-                            conn = serial.Serial(port, baud, timeout=5,rtscts=True,dsrdtr=True)
+                            conn = serial.Serial(port, baud, timeout=0,rtscts=True,dsrdtr=True,writeTimeout = 0)
     except Exception as e:
         # open failed, rate-limit our attempts
         print "Port Not Found!"+str(e)
@@ -487,3 +498,19 @@ def simple_serial_connect(port,baud=57600,timeout=5,rtscts=True,dsrdtr=True):
         # Inappropriate ioctl for device    
     
     return conn
+    
+    
+def getMacAddress(): 
+        import os
+        mac = ""
+        if sys.platform == 'win32': 
+            for line in os.popen("ipconfig /all"): 
+                if line.lstrip().startswith('Physical Address'): 
+                    mac = line.split(':')[1].strip().replace('-',':') 
+                    break 
+        else: 
+            for line in os.popen("/sbin/ifconfig"): 
+                if line.find('Ether') > -1: 
+                    mac = line.split()[4] 
+                    break 
+        return mac 
