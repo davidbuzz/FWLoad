@@ -47,6 +47,7 @@ from pyotp import Read_OTP,Display_OTP,Write_OTP,Verify_OTP,Lock_OTP,Read_OTP_wi
 #TIP: to install the pyotp library included in the FWLoad repository, please do this:  
 #cd FWLoad/pyotp-0.1
 #python setup.py  install --force
+# if you modify anything in the pyotp-0.1 folder, you must rerun the above command for it to take effect.
 
 
 '''
@@ -92,11 +93,12 @@ def do_test_it(port,verbosity):
         Accel_Calib_data1=str(accel_data0)
         Accel_Calib_data2=str(accel_data2)
         
-        # we write them in this order, starting at 1, not zero
-        otp_keys =  ['Manufacturer_Info','Machine_Information','Manufacturing_Info','Date_of_Testing','Time_of_Testing','Accel_Calib_data1','Accel_Calib_data2']
+        # we write them in this position, starting at 1, not zero
+        #otp_keys =  ['Manufacturer_Info','Machine_Information','Manufacturing_Info','Date_of_Testing','Time_of_Testing','Accel_Calib_data1','Accel_Calib_data2']
+        verify_blocks = [1,2,3,4,5,6,7]
         otp_values = [Manufacturer_Info,  Machine_Information,  Manufacturing_Info,  Date_of_Testing,  Time_of_Testing,  Accel_Calib_data1,  Accel_Calib_data2]
         
-        from pyotp import Read_OTP,Display_OTP,Write_OTP,Verify_OTP,Lock_OTP,Read_OTP_with_retries,nonblocking_serial_connect,Lock_OTP_with_retries
+        from pyotp import Read_OTP,Display_OTP,Write_OTP,Verify_OTP,Lock_OTP,Read_OTP_with_retries,nonblocking_serial_connect,Lock_OTP_with_retries,Verify_OTP_normal_range,Verify_OTP_normal_range
         Xconn = nonblocking_serial_connect(port,57600)
         #verbosity = 1  # 0,1,2,3
         otp_data = Read_OTP_with_retries(Xconn,verbosity)
@@ -105,9 +107,13 @@ def do_test_it(port,verbosity):
             blocknumber = 1
             for infostring in otp_values: 
                Write_OTP(Xconn,blocknumber,infostring)
-               Lock_OTP_with_retries(Xconn,blocknumber)
-               Verify_OTP(Xconn,blocknumber,infostring,None,verbosity)
+               
+               #Lock_OTP_with_retries(Xconn,blocknumber)
+               #Verify_OTP(Xconn,blocknumber,infostring,None,verbosity)  # verify individually as we do each..? 
                blocknumber = blocknumber + 1
+               
+            # or we verify the list of values all at once at the end...
+            Verify_OTP_normal_range(Xconn,otp_values,verify_blocks,None,verbosity)
         else:
             print "sorry, failed to read from OTP in THREE tries! "
             
