@@ -3,8 +3,6 @@ import struct
 import sys
 import binascii
 
-BASICDEBUG = False
-MOREDEBUG = False
 
 crc32_tab = [
   0x00000000, 0x77073096, 0xee0e612c, 0x990951ba, 0x076dc419, 0x706af48f, 0xe963a535, 0x9e6495a3,
@@ -55,50 +53,36 @@ def f_fill_64(s):
     return s
 
 def Read_OTP_with_retries(conn,verbosity=0):
-    global BASICDEBUG
-    global MOREDEBUG
 
-    if verbosity <= 0 :
-        DEBUG = False
-        BASICDEBUG = False
-        MOREDEBUG = False
-    if verbosity == 1 :
-        DEBUG = True
-        BASICDEBUG = False
-        MOREDEBUG = False
-    if verbosity == 2 :
-        DEBUG = True
-        BASICDEBUG = True
-        MOREDEBUG = False
-    if verbosity >= 3 :
-        DEBUG = True
-        BASICDEBUG = True
-        MOREDEBUG = True
-     
     retry = 0
     otp_data = {}
     otp_data['read_success'] = False
     
     while (retry < 3) and (otp_data['read_success'] == False):
     
-        if MOREDEBUG:
+        if verbosity>=3:
             print "try:"+str(retry)
+            
+        # just as we find it really helps stop Read_OTP() from handing 
+        conn.close()
+        conn.open()
         
         # read from device into variable unless given it
-        otp_data = Read_OTP(conn,DEBUG)
+        otp_data = Read_OTP(conn,verbosity=verbosity)
                 
         # unable to read data..? 
         if otp_data['read_success'] == False:
             time.sleep(0.5)
             conn.close()
+            print "WARNING: REOPENING CONNECTION NOW"
             conn.open()
             retry = retry+1
-            if MOREDEBUG:
+            if verbosity>=3:
                 print "read_success false, retrying!"
         
         # if read data is good! 
         if otp_data['read_success'] == True:
-            if MOREDEBUG:
+            if verbosity>=3:
                 print "read_success true:!"
             return otp_data
 
@@ -106,15 +90,15 @@ def Read_OTP_with_retries(conn,verbosity=0):
     return otp_data
 
 
-def Read_OTP(conn,DEBUG=True):
-    if BASICDEBUG:
+def Read_OTP(conn,verbosity=0):
+    if verbosity>=2:
        print "Read_OTP"
 
     # flush input serial buffers
     conn.reset_input_buffer()
     # flush other buffers
     #conn.flush()
-    conn.reset_output_buffer()
+    conn.reset_output_buffer()    # important to prevent the .write() below from blocking.
     
     otp_data = {}
     otp_data['written'] = []
@@ -127,9 +111,13 @@ def Read_OTP(conn,DEBUG=True):
     starttime = int(time.time())  # now in unix seconds.     
 
     cmd = "otp show\r\n".encode()
-    if BASICDEBUG:
+    if verbosity>=2:
         print cmd,
-    conn.write(cmd)
+      
+    # to prevent ever blocking on conn.write below, we probe the connection with select() to see if it's "writable" right now..? 
+    #TODO    
+      
+    conn.write(cmd) # might block here..? 
 
     linecount = 0
         
@@ -147,7 +135,7 @@ def Read_OTP(conn,DEBUG=True):
             if (this_time - last_time) > 1:  # max 1 seconds to handle reading the results of this one command.
                 #read_success = False   # timeout hit
                 otp_data['read_success'] = False
-                if BASICDEBUG:
+                if verbosity>=2:
                     print "timeout reached in Read_OTP"
                 return otp_data
             # caution... readline needs a ASCII LF (10 decimal) to think its the end of the line, 
@@ -159,7 +147,7 @@ def Read_OTP(conn,DEBUG=True):
             if len(line) == 0:
                 continue
             
-            if MOREDEBUG:
+            if verbosity>=3:
                 print "handling line:"+line+"    -> at linecount:"+str(linecount)
             
             words = line.split()   
@@ -174,7 +162,7 @@ def Read_OTP(conn,DEBUG=True):
             # example line: ' 0: U ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff e666fea6'
             # example line: '11: U ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff e666fea6'
 
-                if DEBUG: 
+                if verbosity>=1: 
                     print line,  # just display the line/s we know about as-is 
 
             
@@ -208,7 +196,7 @@ def Read_OTP(conn,DEBUG=True):
                     read_all_lines_success = read_all_lines_success + 1 
 
             else:
-                if MOREDEBUG:
+                if verbosity>=3:
                     print "unknown line, ignoring:"+line
 
             
@@ -235,9 +223,9 @@ def Read_OTP(conn,DEBUG=True):
     return otp_data
 
 
-def Display_OTP(conn,otp_data=None,DEBUG=True):
+def Display_OTP(conn,otp_data=None,verbosity=0):
   
-    if BASICDEBUG:
+    if verbosity>=2:
       print "Display_OTP"
     #lock = ['','','','','','','','','','','','','','','','']    # fixed size 16, must be initialised. 
     #written = ['','','','','','','','','','','','','','','','']
@@ -259,20 +247,20 @@ def Display_OTP(conn,otp_data=None,DEBUG=True):
       written = otp_data['written']
       lock = otp_data['lock']
 
-      if MOREDEBUG:
+      if verbosity>=3:
         print "read_success true:!"
     
       # all possible blocks...
       for blocknumber in range(0,15):
 
-        if MOREDEBUG:
+        if verbosity>=3:
             print "blocknumber"+str(blocknumber)
-            print str(otp_data)
+            #print str(otp_data)
 
         # don't display data we don't know about from the read: 
         if blocknumber in otp_data:
 
-            if MOREDEBUG:
+            if verbosity>=3:
                 print "found blocknumber"+str(blocknumber)
             
             blockstring = str(blocknumber)
@@ -307,18 +295,18 @@ def Display_OTP(conn,otp_data=None,DEBUG=True):
                 #print "Segment", blockstring, lock[blocknumber], "Info:\t", shortstring, " Written:", written[blocknumber]
 
 # write one block:    
-def Write_OTP(conn,blocknumber,infostring,DEBUG=True):
-        if BASICDEBUG:
+def Write_OTP(conn,blocknumber,infostring,verbosity=0):
+        if verbosity>=2:
              print "Write_OTP"
              
         # flush input serial buffers
         conn.reset_input_buffer()
         # flush other buffers
-        #conn.flush()
+        conn.flush()
         conn.reset_output_buffer()
     
         #Write Information
-        if BASICDEBUG:
+        if verbosity>=1:
             print "Writing..."
         if blocknumber < 6:
             information = str(str(infostring).encode('hex'))
@@ -343,25 +331,40 @@ def Write_OTP(conn,blocknumber,infostring,DEBUG=True):
         src = bytearray.fromhex(information)
         crc = otp_crc(src)
         cmd = "otp write " + str(blocknumber) + " " + str(information) + " " + str(crc) + "\r\n".encode()
-        if BASICDEBUG:
+        if verbosity>=2:
             print cmd,
         conn.write(cmd)
         time.sleep(0.5)
+        #conn.write(cmd)  # total hack to increase lilelyhood we get the nsh to action one of them.  it's a ghetto retry
+        #time.sleep(0.24)
+        #conn.write(cmd)  # total hack to increase lilelyhood we get the nsh to action one of them.  it's a ghetto retry
 
         # flush input serial buffers
-        conn.reset_input_buffer()
+        #conn.reset_input_buffer()
         # flush other buffers
         #conn.flush()
         
         # return it in similar format as 'otp read' for easy verify:
         return str(blocknumber) + " " + str(information) + " " + str(crc) + "\r\n"
 
+# try to write a singular block up to 3 times , verifying each time to see if it worked, and once it works ( or hits 3 ), return.
+def Write_OTP_with_verify_and_retrys(conn,blocknumber,infostring,verbosity=0):
+    retry = 0
+    completed = False
+    while retry < 3 and completed == False:
+        Write_OTP(conn,blocknumber,infostring,verbosity=verbosity)
+        result = Verify_OTP(conn,blocknumber,infostring,otp_data=None,verbosity=verbosity) # don't display verbose data
+        if result:  # it verified ok! 
+            completed = True
+            return completed
+        retry = retry+1
+    return completed
 
 # verify blocks 1-7 ( excluding 0, and 8-15 ) 
 # otp_values must be an array the same length as teh number of blocks we are verifying, and have the expected block data in it.
 # otp_data is just a cache of pre-read data if we happen to have already read it recently. ( we haven't normally )
-def Verify_OTP_normal_range(conn,otp_values,verify_blocks,otp_data=None,DEBUG=True):
-    if BASICDEBUG:
+def Verify_OTP_normal_range(conn,otp_values,verify_blocks,otp_data=None,verbosity=0):
+    if verbosity>=2:
         print "Verify_OTP_normal_range"
     # eg: verify_blocks = [1,2,3,4,5,6,7]
     
@@ -372,8 +375,8 @@ def Verify_OTP_normal_range(conn,otp_values,verify_blocks,otp_data=None,DEBUG=Tr
     
     # if we don't already have some, read it quietly
     if otp_data==None:
-        otp_data = Read_OTP_with_retries(conn,DEBUG)
-        if BASICDEBUG:
+        otp_data = Read_OTP_with_retries(conn,verbosity=verbosity)
+        if verbosity>=2:
             print "otp re-read done"
 
     # unable to read data..? 
@@ -390,14 +393,14 @@ def Verify_OTP_normal_range(conn,otp_values,verify_blocks,otp_data=None,DEBUG=Tr
         for idx in range(0,len(otp_values)):
             blocknumber = verify_blocks[idx]
             infostring = otp_values[idx]
-            Verify_OTP(conn,blocknumber,infostring,otp_data,DEBUG)
+            Verify_OTP(conn,blocknumber,infostring,otp_data,verbosity=verbosity)
 
-    
+
 
 # verify one block - it's a bit inefficent this way as we normally want to verify the entire OTP.... ( or the first 7 blocks anyway ) 
 # here we are comparing data actually FROM the otp ( in otp_data ) with what we hope is on it ( blocknumber,infostring ) 
-def Verify_OTP(conn,blocknumber,infostring,otp_data=None,DEBUG=True):
-    if BASICDEBUG:
+def Verify_OTP(conn,blocknumber,infostring,otp_data=None,verbosity=0):
+    if verbosity>=2:
         print "Verify_OTP"
 
     # flush input serial buffers
@@ -408,8 +411,8 @@ def Verify_OTP(conn,blocknumber,infostring,otp_data=None,DEBUG=True):
         
     # if we don't already have some, read it quietly
     if otp_data==None:
-        otp_data = Read_OTP_with_retries(conn,DEBUG)
-        if BASICDEBUG:
+        otp_data = Read_OTP_with_retries(conn,verbosity=verbosity)
+        if verbosity>=2:
             print "otp re-read done"
     
     # unable to read data..? 
@@ -426,13 +429,13 @@ def Verify_OTP(conn,blocknumber,infostring,otp_data=None,DEBUG=True):
     # if read data is good! 
     if otp_data['read_success'] == True:
     
-        if MOREDEBUG:
+        if verbosity>=3:
             print "looking for block:"+str(blocknumber)
     
         # the single block we are looking for:
         if blocknumber in otp_data:
         
-            if MOREDEBUG:
+            if verbosity>=3:
                 print "comparing block to otp:"+str(blocknumber)
     
             # let us compare agains either the stringified OR the hexified versions, any are fine. :-) 
@@ -464,7 +467,7 @@ def Verify_OTP(conn,blocknumber,infostring,otp_data=None,DEBUG=True):
             ffilled = ''
             x = ''
             if infostring.find(',') > 0:
-                if MOREDEBUG:
+                if verbosity>=3:
                     print "testing possible caldata"
                 accel_data = [float(x) for x in infostring.split(',') if x]
                 packed_accel_data = struct.pack('%sf' % len(accel_data), *accel_data)
@@ -473,7 +476,7 @@ def Verify_OTP(conn,blocknumber,infostring,otp_data=None,DEBUG=True):
                 
                 ffilled = f_fill_64(x)    
                 if  otp_data[blocknumber] == ffilled:
-                    print "Verify Succeeded! on caldata2 for block:"+str(blocknumber)
+                    print "Verify Succeeded! on caldata for block:"+str(blocknumber)
                     return True
                     
                 if otp_data[blocknumber] == x:
@@ -482,7 +485,7 @@ def Verify_OTP(conn,blocknumber,infostring,otp_data=None,DEBUG=True):
 
             print "Verify Failed!"+str(blocknumber)
             
-            if MOREDEBUG:   # review the possible data we are comparing in different formats 
+            if verbosity>=3:   # review the possible data we are comparing in different formats 
                  print "trying to match"
                  print "with0 (from otp) :"+otp_data[blocknumber]
                  print "with1 (from otp):"+information
@@ -496,18 +499,18 @@ def Verify_OTP(conn,blocknumber,infostring,otp_data=None,DEBUG=True):
     return False
 
     
-def Lock_OTP_with_retries(conn,blocknumber,DEBUG=True):
+def Lock_OTP_with_retries(conn,blocknumber,verbosity=0):
 
     retry = 0    
     result = False
     while (retry < 3) and (result == False):
-        result = Lock_OTP(conn,blocknumber,DEBUG)
+        result = Lock_OTP(conn,blocknumber,verbosity=verbosity)
         retry = retry+1
     return result  
 
 # we hope u did a verify etc before doing this: 
-def Lock_OTP(conn,blocknumber,DEBUG=True):
-    if BASICDEBUG:
+def Lock_OTP(conn,blocknumber,verbosity=0):
+    if verbosity>=2:
        print "Lock_OTP"
 
     # flush input serial buffers
@@ -517,10 +520,11 @@ def Lock_OTP(conn,blocknumber,DEBUG=True):
     conn.reset_output_buffer()
 
     cmd = "otp lock "+str(blocknumber)+" "+str(blocknumber)+"\r\n".encode()
-    if BASICDEBUG:
+    if verbosity>=2:
         print cmd,
     conn.write(cmd)
-    print "Segment " + str(blocknumber) + " probably locked!\n"
+    if verbosity>=1:
+        print "Segment " + str(blocknumber) + " probably locked!\n"
 
     # give it a little time to occur:
     time.sleep(0.5)
@@ -534,7 +538,7 @@ def Lock_OTP(conn,blocknumber,DEBUG=True):
         line = conn.readline()  # don't block here, see above.
         if len(line) == 0:
             continue
-        if BASICDEBUG:
+        if verbosity>=2:
             print "line:"+line,
         if (line != None) and ( line != "") :
             if line[0] == 'L' or line[0] == 'F':
@@ -557,15 +561,15 @@ def nonblocking_serial_connect(port,baud=57600,timeout=5,rtscts=True,dsrdtr=True
             if "linux" in _platform:
                     # Linux, don't open Mac OS and Win ports
                     if not "COM" in port and not "tty.usb" in port:
-                            conn = serial.Serial(port, baud, timeout=0,rtscts=True,dsrdtr=True,writeTimeout = 0)
+                            conn = serial.Serial(port, baud, timeout=0,rtscts=True,dsrdtr=True,writeTimeout = 0,inter_byte_timeout=0.1)
             elif "darwin" in _platform:
                     # OS X, don't open Windows and Linux ports
                     if not "COM" in port and not "ACM" in port:
-                            conn = serial.Serial(port, baud, timeout=0,rtscts=True,dsrdtr=True,writeTimeout = 0)
+                            conn = serial.Serial(port, baud, timeout=0,rtscts=True,dsrdtr=True,writeTimeout = 0,inter_byte_timeout=0.1)
             elif "win" in _platform:
                     # Windows, don't open POSIX ports
                     if not "/" in port:
-                            conn = serial.Serial(port, baud, timeout=0,rtscts=True,dsrdtr=True,writeTimeout = 0)
+                            conn = serial.Serial(port, baud, timeout=0,rtscts=True,dsrdtr=True,writeTimeout = 0,inter_byte_timeout=0.1)
     except Exception as e:
         # open failed, rate-limit our attempts
         print "Port Not Found!"+str(e)
@@ -575,18 +579,4 @@ def nonblocking_serial_connect(port,baud=57600,timeout=5,rtscts=True,dsrdtr=True
     
     return conn
     
-    
-def getMacAddress(): 
-        import os
-        mac = ""
-        if sys.platform == 'win32': 
-            for line in os.popen("ipconfig /all"): 
-                if line.lstrip().startswith('Physical Address'): 
-                    mac = line.split(':')[1].strip().replace('-',':') 
-                    break 
-        else: 
-            for line in os.popen("/sbin/ifconfig"): 
-                if line.find('Ether') > -1: 
-                    mac = line.split()[4] 
-                    break 
-        return mac 
+
