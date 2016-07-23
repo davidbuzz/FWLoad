@@ -470,7 +470,7 @@ def Lock_OTP(conn,blocknumber,DEBUG=True):
                 
 
 # this is non-blocking on both read() and write() calls due to the use of writeTimeout = 0 and timeout = 0
-def simple_serial_connect(port,baud=57600,timeout=5,rtscts=True,dsrdtr=True):
+def nonblocking_serial_connect(port,baud=57600,timeout=5,rtscts=True,dsrdtr=True):
 
     from sys import platform as _platform
     import serial 
