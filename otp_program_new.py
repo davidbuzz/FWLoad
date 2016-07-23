@@ -41,7 +41,12 @@ import os
 import binascii
 import crcmod
 import zlib
-from pyotp import Read_OTP,Display_OTP,Write_OTP,Verify_OTP,Lock_OTP,Read_OTP_with_retries,simple_serial_connect,Lock_OTP_with_retries,getMacAddress
+
+from pyotp import Read_OTP,Display_OTP,Write_OTP,Verify_OTP,Lock_OTP,Read_OTP_with_retries,nonblocking_serial_connect,Lock_OTP_with_retries,getMacAddress
+
+#TIP: to install the pyotp library included in the FWLoad repository, please do this:  
+#cd FWLoad/pyotp-0.1
+#python setup.py  install --force
 
 
 '''
@@ -69,7 +74,7 @@ Lock:
                         python otp_program.py --port /dev/ttyxxx --info-seg INFO_SEG --lock
 '''
 
-def do_test_it(port):
+def do_test_it(port,verbosity):
 
         device_barcode = '1234567890'  # clearly a test.
 
@@ -91,9 +96,9 @@ def do_test_it(port):
         otp_keys =  ['Manufacturer_Info','Machine_Information','Manufacturing_Info','Date_of_Testing','Time_of_Testing','Accel_Calib_data1','Accel_Calib_data2']
         otp_values = [Manufacturer_Info,  Machine_Information,  Manufacturing_Info,  Date_of_Testing,  Time_of_Testing,  Accel_Calib_data1,  Accel_Calib_data2]
         
-        from pyotp import Read_OTP,Display_OTP,Write_OTP,Verify_OTP,Lock_OTP,Read_OTP_with_retries,simple_serial_connect,Lock_OTP_with_retries
-        Xconn = simple_serial_connect(port,57600)
-        verbosity = 1  # 0,1,2,3
+        from pyotp import Read_OTP,Display_OTP,Write_OTP,Verify_OTP,Lock_OTP,Read_OTP_with_retries,nonblocking_serial_connect,Lock_OTP_with_retries
+        Xconn = nonblocking_serial_connect(port,57600)
+        #verbosity = 1  # 0,1,2,3
         otp_data = Read_OTP_with_retries(Xconn,verbosity)
         if otp_data['read_success'] == True:
             Display_OTP(Xconn,otp_data)
@@ -139,18 +144,18 @@ if __name__ == '__main__':
     port = args.port
     print("Trying %s" % port)
    
-    # just do the built-in test and get out.
-    if args.test:
-        do_test_it(port);
-        sys.exit()
-
     # verbosity level of 0, 1, 2 at least
     verbosity = 0
     if args.verbose:
         verbosity = args.verbose
 
+    # just do the built-in test and get out.
+    if args.test:
+        do_test_it(port,verbosity);
+        sys.exit()
+
     #conn = connection.Connection()  # untested. 
-    conn = simple_serial_connect(port,args.baud)   # works.
+    conn = nonblocking_serial_connect(port,args.baud)   # works.
 
     #Read, optionally with more verbosity in the read.
     otp_data = {}
