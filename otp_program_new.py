@@ -42,7 +42,7 @@ import binascii
 import crcmod
 import zlib
 
-from pyotp import Read_OTP,Display_OTP,Write_OTP,Verify_OTP,Lock_OTP,Read_OTP_with_retries,nonblocking_serial_connect,Lock_OTP_with_retries,getMacAddress
+from pyotp import Read_OTP,Display_OTP,Write_OTP,Verify_OTP,Lock_OTP,Read_OTP_with_retries,nonblocking_serial_connect,Lock_OTP_with_retries,Write_OTP_with_verify_and_retrys
 
 #TIP: to install the pyotp library included in the FWLoad repository, please do this:  
 #cd FWLoad/pyotp-0.1
@@ -75,7 +75,7 @@ Lock:
                         python otp_program.py --port /dev/ttyxxx --info-seg INFO_SEG --lock
 '''
 
-def do_test_it(port,verbosity):
+def do_test_it(port,verbosity,args):
 
         device_barcode = '1234567890'  # clearly a test.
 
@@ -86,10 +86,17 @@ def do_test_it(port,verbosity):
         # each of the 7 blocks: ( 1-7 ) , noting that we don't populate block zero.(0)
         
         Manufacturer_Info='Hex Technology, \xA9 ProfiCNC 2016'
-        Machine_Information=getMacAddress()
+        #Machine_Information=getMacAddress()
+        Machine_Information='dd:ee:aa:dd:be:ef'
         Manufacturing_Info=device_barcode
-        Date_of_Testing=time.strftime("%x")
-        Time_of_Testing=time.strftime("%X")
+        
+        # note that this is the proper way:
+        #Date_of_Testing=time.strftime("%x")
+        #Time_of_Testing=time.strftime("%X")
+        # but for testing, we need fixed values: 
+        Date_of_Testing='07/23/16'
+        Time_of_Testing='15:38:46'
+                
         Accel_Calib_data1=str(accel_data0)
         Accel_Calib_data2=str(accel_data2)
         
@@ -98,22 +105,29 @@ def do_test_it(port,verbosity):
         verify_blocks = [1,2,3,4,5,6,7]
         otp_values = [Manufacturer_Info,  Machine_Information,  Manufacturing_Info,  Date_of_Testing,  Time_of_Testing,  Accel_Calib_data1,  Accel_Calib_data2]
         
-        from pyotp import Read_OTP,Display_OTP,Write_OTP,Verify_OTP,Lock_OTP,Read_OTP_with_retries,nonblocking_serial_connect,Lock_OTP_with_retries,Verify_OTP_normal_range,Verify_OTP_normal_range
+        from pyotp import Read_OTP,Display_OTP,Write_OTP,Verify_OTP,Lock_OTP,Read_OTP_with_retries,nonblocking_serial_connect,Lock_OTP_with_retries,Verify_OTP_normal_range,Verify_OTP_normal_range,Write_OTP_with_verify_and_retrys
         Xconn = nonblocking_serial_connect(port,57600)
         #verbosity = 1  # 0,1,2,3
         otp_data = Read_OTP_with_retries(Xconn,verbosity)
         if otp_data['read_success'] == True:
-            Display_OTP(Xconn,otp_data)
+            if args.verbose >= 0:
+                print "BEFORE ANY CHANGES:"
+                Display_OTP(Xconn,otp_data)
             blocknumber = 1
             for infostring in otp_values: 
-               Write_OTP(Xconn,blocknumber,infostring)
+               if not args.only_display:
+                    #Write_OTP(Xconn,blocknumber,infostring)
+                    Write_OTP_with_verify_and_retrys(Xconn,blocknumber,infostring)
                
-               #Lock_OTP_with_retries(Xconn,blocknumber)
-               #Verify_OTP(Xconn,blocknumber,infostring,None,verbosity)  # verify individually as we do each..? 
+               if args.lock and not args.only_display:
+                    Lock_OTP_with_retries(Xconn,blocknumber)
                blocknumber = blocknumber + 1
                
-            # or we verify the list of values all at once at the end...
-            Verify_OTP_normal_range(Xconn,otp_values,verify_blocks,None,verbosity)
+            if args.verbose >= 0 and not args.only_display:
+                print "AFTER ANY CHANGES:"
+                Display_OTP(Xconn)
+            # if we just use Write_OTP in the loop, then we verify the list of values all at once at the end...
+            #Verify_OTP_normal_range(Xconn,otp_values,verify_blocks,None,verbosity)
         else:
             print "sorry, failed to read from OTP in THREE tries! "
             
@@ -155,59 +169,68 @@ if __name__ == '__main__':
     if args.verbose:
         verbosity = args.verbose
 
-    # just do the built-in test and get out.
-    if args.test:
-        do_test_it(port,verbosity);
-        sys.exit()
 
-    #conn = connection.Connection()  # untested. 
-    conn = nonblocking_serial_connect(port,args.baud)   # works.
-
-    #Read, optionally with more verbosity in the read.
-    otp_data = {}
-    otp_data = Read_OTP_with_retries(conn,verbosity)
+    # serial port error handler
+    try:
     
-    # if read data is good! 
-    if otp_data['read_success'] == False:
-        print "sorry, failed to read from OTP in THREE tries! "
-        conn.close()
-        sys.exit(1)
-      
-    # present the data to the screen human-readable: 
-    Display_OTP(conn,otp_data)
+        # just do the built-in test and get out.
+        if args.test:
+            do_test_it(port,verbosity,args);
+            sys.exit()
     
-    # easy. 
-    if args.only_display:
-        print "Display Completed, nothing further done."
-        sys.exit(0)  # done here.
+    
+        #conn = connection.Connection()  # untested. 
+        conn = nonblocking_serial_connect(port,args.baud)   # works.
+    
+        #Read, optionally with more verbosity in the read.
+        otp_data = {}
+        otp_data = Read_OTP_with_retries(conn,verbosity)
         
-    # if we do any changes, then a verify is needed after either/both the write and/or lock.
-    do_verify = False
-    
-    # optionally write 
-    if args.info_seg and args.info:
-          #'--info-seg'
-          blocknumber = args.info_seg
-          #'--info'
-          infostring = args.info
-
-          # write 
-          Write_OTP(conn,blocknumber,infostring)
-
-          do_verify = True
-
-    
-    # optionall lock it as well. 
-    if args.lock:     
-          # lock:
-          Lock_OTP_with_retries(conn,blocknumber)
+        # if read data is good! 
+        if otp_data['read_success'] == False:
+            print "sorry, failed to read from OTP in THREE tries! "
+            conn.close()
+            sys.exit(1)
           
-          do_verify = True
-
-    # after write and/or lock , verify the lock is done.           
-    if  do_verify:
-          Verify_OTP(conn,blocknumber,infostring,None,verbosity)
-          
-
-    # we are done.
-    conn.close()
+        # present the data to the screen human-readable: 
+        Display_OTP(conn,otp_data)
+        
+        # easy. 
+        if args.only_display:
+            print "Display Completed, nothing further done."
+            sys.exit(0)  # done here.
+            
+        # if we do any changes, then a verify is needed after either/both the write and/or lock.
+        do_verify = False
+        
+        # optionally write 
+        if args.info_seg and args.info:
+              #'--info-seg'
+              blocknumber = args.info_seg
+              #'--info'
+              infostring = args.info
+    
+              # write 
+              Write_OTP(conn,blocknumber,infostring)
+    
+              do_verify = True
+    
+        
+        # optionall lock it as well. 
+        if args.lock:     
+              # lock:
+              Lock_OTP_with_retries(conn,blocknumber)
+              
+              do_verify = True
+    
+        # after write and/or lock , verify the lock is done.           
+        if  do_verify:
+              Verify_OTP(conn,blocknumber,infostring,None,verbosity)
+              
+    
+        # we are done.
+        conn.close()
+        
+    except serial.serialutil.SerialException as e:
+        print "Serial Port Not found, or went away unexpectedly, ABORTED"
+        
