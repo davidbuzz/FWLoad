@@ -357,8 +357,45 @@ def Write_OTP(conn,blocknumber,infostring,DEBUG=True):
         return str(blocknumber) + " " + str(information) + " " + str(crc) + "\r\n"
 
 
+# verify blocks 1-7 ( excluding 0, and 8-15 ) 
+# otp_values must be an array the same length as teh number of blocks we are verifying, and have the expected block data in it.
+# otp_data is just a cache of pre-read data if we happen to have already read it recently. ( we haven't normally )
+def Verify_OTP_normal_range(conn,otp_values,verify_blocks,otp_data=None,DEBUG=True):
+    if BASICDEBUG:
+        print "Verify_OTP_normal_range"
+    # eg: verify_blocks = [1,2,3,4,5,6,7]
+    
+    if len(otp_values) != len(verify_blocks):
+        print "ERROR: Verify_OTP_normal_range called with bad data, aborted."
+        conn.close()        
+        system.exit(1)
+    
+    # if we don't already have some, read it quietly
+    if otp_data==None:
+        otp_data = Read_OTP_with_retries(conn,DEBUG)
+        if BASICDEBUG:
+            print "otp re-read done"
 
-# verify one block:
+    # unable to read data..? 
+    if otp_data['read_success'] == False:
+        print "ERROR: unable to verify data"
+        conn.close()        
+        system.exit(1)
+
+    # if read data is good! 
+    if otp_data['read_success'] == True:
+    
+        # no matter the order in the verify_blocks and otp_values, we match their positions up by array position.
+        idx = 0
+        for idx in range(0,len(otp_values)):
+            blocknumber = verify_blocks[idx]
+            infostring = otp_values[idx]
+            Verify_OTP(conn,blocknumber,infostring,otp_data,DEBUG)
+
+    
+
+# verify one block - it's a bit inefficent this way as we normally want to verify the entire OTP.... ( or the first 7 blocks anyway ) 
+# here we are comparing data actually FROM the otp ( in otp_data ) with what we hope is on it ( blocknumber,infostring ) 
 def Verify_OTP(conn,blocknumber,infostring,otp_data=None,DEBUG=True):
     if BASICDEBUG:
         print "Verify_OTP"
@@ -400,23 +437,59 @@ def Verify_OTP(conn,blocknumber,infostring,otp_data=None,DEBUG=True):
     
             # let us compare agains either the stringified OR the hexified versions, any are fine. :-) 
             if otp_data[blocknumber] == infostring:
-                print "Verify Succeeded! on infostring!"
+                print "Verify Succeeded! on infostring for block:"+str(blocknumber)
                 return True
         
-            information = str(str(infostring).encode('hex'))
-            if otp_data[blocknumber] == information:
-                print "Verify Succeeded! on information!"
+            # turn raw hex back from otp into potentially readable/s for comparison:
+            information = str(otp_data[blocknumber].decode('hex'))
+            shortstring = information[:information.index('\xff')]
+            
+            if information == infostring:
+                print "Verify Succeeded! on information for block:"+str(blocknumber)
                 return True
+                
+            if shortstring == infostring:
+                print "Verify Succeeded! on shortstring for block:"+str(blocknumber)
+                return True
+                
 
-            ffilled = f_fill_64(information)    
-            if otp_data[blocknumber] == ffilled:
-                print "Verify Succeeded! on ffilled!"
-                return True
+            # turn raw hex back from otp into potentially callib data and see if it matches what we have..? 
+            caldata = struct.unpack('6f', bytearray.fromhex(otp_data[blocknumber][:48]))    
+            
+            if caldata == infostring:
+                print "Verify Succeeded! on caldata1 for block:"+str(blocknumber)
+                return True                
+
+            # turn infostring into hex callib data and see if that matches, the opposite test to above:
+            ffilled = ''
+            x = ''
+            if infostring.find(',') > 0:
+                if MOREDEBUG:
+                    print "testing possible caldata"
+                accel_data = [float(x) for x in infostring.split(',') if x]
+                packed_accel_data = struct.pack('%sf' % len(accel_data), *accel_data)
+                accelhexarray = binascii.hexlify(packed_accel_data)
+                x = str(accelhexarray)
+                
+                ffilled = f_fill_64(x)    
+                if  otp_data[blocknumber] == ffilled:
+                    print "Verify Succeeded! on caldata2 for block:"+str(blocknumber)
+                    return True
+                    
+                if otp_data[blocknumber] == x:
+                    print "Verify Succeeded! on caldata3 for block:"+str(blocknumber)
+                    return True                
 
             print "Verify Failed!"+str(blocknumber)
-            print infostring
-            print information
-            print otp_data[blocknumber]
+            
+            if MOREDEBUG:   # review the possible data we are comparing in different formats 
+                 print "trying to match"
+                 print "with0 (from otp) :"+otp_data[blocknumber]
+                 print "with1 (from otp):"+information
+                 print "with2 (from otp):"+str(caldata)
+                 print "with3 (parameter):"+infostring
+                 print "with4 (parameter):"+ffilled
+                 print "with5 (parameter):"+x
             
 
     # default behaviour:
@@ -429,6 +502,7 @@ def Lock_OTP_with_retries(conn,blocknumber,DEBUG=True):
     result = False
     while (retry < 3) and (result == False):
         result = Lock_OTP(conn,blocknumber,DEBUG)
+        retry = retry+1
     return result  
 
 # we hope u did a verify etc before doing this: 
@@ -447,7 +521,9 @@ def Lock_OTP(conn,blocknumber,DEBUG=True):
         print cmd,
     conn.write(cmd)
     print "Segment " + str(blocknumber) + " probably locked!\n"
-   
+
+    # give it a little time to occur:
+    time.sleep(0.5)
 
     # immediate validate: ? 
     # this waits for 2-ish secs for the serial device to get back to us with it's response of "LOCKED" or similar.
